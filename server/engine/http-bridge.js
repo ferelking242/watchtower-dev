@@ -21,10 +21,16 @@ export class HttpBridge {
     this._logger({ type: 'network', method, url });
 
     try {
+      // Filter out empty/null header values before merging — extensions may set
+      // user-agent: "" from SharedPreferences defaults, which breaks some APIs.
+      const cleanHeaders = Object.fromEntries(
+        Object.entries(headers || {}).filter(([, v]) => v !== null && v !== undefined && v !== '')
+      );
+
       const config = {
         method,
         url,
-        headers: { 'User-Agent': 'Mozilla/5.0 (compatible; WatchtowerDev/1.0)', ...headers },
+        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36', ...cleanHeaders },
         responseType: 'text',
         transformResponse: [d => d],
         maxRedirects: 5,
