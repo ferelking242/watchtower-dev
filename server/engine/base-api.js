@@ -1,16 +1,18 @@
 // ─────────────────────────────────────────────────────────────────────────────
-// Base API injected into QuickJS — exact replica of what the Watchtower app
-// injects via JsExtensionService, JsHttpClient, JsDomSelector, JsUtils.
-// All sendMessage() calls are async to match the asyncify QuickJS build.
+// Base API injected into the JS sandbox — exact replica of what Mangayomi injects.
+//
+// KEY DESIGN: DOM calls (Document/Element) are SYNCHRONOUS — extensions do NOT
+// await them. HTTP calls (Client) are ASYNC — extensions must await them.
+// This mirrors the original Dart bridge behaviour.
 // ─────────────────────────────────────────────────────────────────────────────
 
 export const BASE_API_JS = (sourceJson) => `
 
-// ── MProvider base class (from JsExtensionService) ───────────────────────────
+// ── MProvider base class ───────────────────────────────────────────────────────
 class MProvider {
     get source() { return ${sourceJson}; }
     get supportsLatest() { throw new Error("supportsLatest not implemented"); }
-    getHeaders(url) { throw new Error("getHeaders not implemented"); }
+    getHeaders(url) { return {}; }
     async getPopular(page) { throw new Error("getPopular not implemented"); }
     async getLatestUpdates(page) { throw new Error("getLatestUpdates not implemented"); }
     async search(query, page, filters) { throw new Error("search not implemented"); }
@@ -18,14 +20,18 @@ class MProvider {
     async getPageList(url) { throw new Error("getPageList not implemented"); }
     async getVideoList(url) { throw new Error("getVideoList not implemented"); }
     async getHtmlContent(name, url) { throw new Error("getHtmlContent not implemented"); }
-    async cleanHtmlContent(html) { throw new Error("cleanHtmlContent not implemented"); }
+    async cleanHtmlContent(html) { return html; }
     getFilterList() { return []; }
     getSourcePreferences() { return []; }
     getCustomLists() { return []; }
     async getCustomList(id, page) { throw new Error("getCustomList not implemented for id: " + id); }
+    async getPreference(key, defaultValue) {
+        const prefs = new SharedPreferences();
+        return prefs.get(key, defaultValue);
+    }
 }
 
-// ── HTTP Client (from JsHttpClient) ──────────────────────────────────────────
+// ── HTTP Client (ASYNC — extensions must await these) ──────────────────────────
 class Client {
     constructor(reqcopyWith) { this.reqcopyWith = reqcopyWith || null; }
     async _send(method, url, headers, body) {
@@ -34,73 +40,65 @@ class Client {
         const result = await sendMessage("http_" + method.toLowerCase(), JSON.stringify(args));
         return JSON.parse(result);
     }
-    async head(url, headers)             { return this._send("head",   url, headers); }
-    async get(url, headers)              { return this._send("get",    url, headers); }
-    async post(url, headers, body)       { return this._send("post",   url, headers, body); }
-    async put(url, headers, body)        { return this._send("put",    url, headers, body); }
-    async delete(url, headers, body)     { return this._send("delete", url, headers, body); }
-    async patch(url, headers, body)      { return this._send("patch",  url, headers, body); }
+    async head(url, headers)         { return this._send("head",   url, headers); }
+    async get(url, headers)          { return this._send("get",    url, headers); }
+    async post(url, headers, body)   { return this._send("post",   url, headers, body); }
+    async put(url, headers, body)    { return this._send("put",    url, headers, body); }
+    async delete(url, headers, body) { return this._send("delete", url, headers, body); }
+    async patch(url, headers, body)  { return this._send("patch",  url, headers, body); }
 }
 
-// ── DOM Document (from JsDomSelector — native bridge variant with async) ─────
+// ── DOM Document (SYNCHRONOUS — extensions do NOT await these) ─────────────────
 class Document {
     constructor(html) { this._html = typeof html === 'string' ? html : ''; }
 
-    async _getElement(type) {
-        const key = await sendMessage("get_doc_element", JSON.stringify([this._html, type]));
+    _getElement(type) {
+        const key = domMessage("get_doc_element", JSON.stringify([this._html, type]));
         return new Element(key);
     }
-    get body()              { return this._getElement('body'); }
-    get documentElement()   { return this._getElement('documentElement'); }
-    get head()              { return this._getElement('head'); }
-    get parent()            { return this._getElement('parent'); }
+    get body()            { return this._getElement('body'); }
+    get documentElement() { return this._getElement('documentElement'); }
+    get head()            { return this._getElement('head'); }
+    get parent()          { return this._getElement('parent'); }
 
-    async _getString(type) {
-        return sendMessage("get_doc_string", JSON.stringify([this._html, type]));
-    }
-    get text()     { return this._getString('text'); }
-    get outerHtml(){ return this._getString('outerHtml'); }
+    get text()     { return domMessage("get_doc_string", JSON.stringify([this._html, 'text'])); }
+    get outerHtml(){ return domMessage("get_doc_string", JSON.stringify([this._html, 'outerHtml'])); }
 
-    async selectFirst(selector) {
-        const key = await sendMessage("doc_select_first", JSON.stringify([this._html, selector]));
+    selectFirst(selector) {
+        const key = domMessage("doc_select_first", JSON.stringify([this._html, selector]));
         return new Element(key);
     }
-    async select(selector) {
-        const keys = JSON.parse(await sendMessage("doc_select", JSON.stringify([this._html, selector])));
+    select(selector) {
+        const raw = domMessage("doc_select", JSON.stringify([this._html, selector]));
+        const keys = JSON.parse(raw);
         return keys.map(k => new Element(k));
     }
-    async xpathFirst(xpath) {
-        return sendMessage("doc_xpath_first", JSON.stringify([this._html, xpath]));
+    xpathFirst(xpath) {
+        return domMessage("doc_xpath_first", JSON.stringify([this._html, xpath]));
     }
-    async xpath(xpath) {
-        return JSON.parse(await sendMessage("doc_xpath", JSON.stringify([this._html, xpath])));
+    xpath(xpath) {
+        return JSON.parse(domMessage("doc_xpath", JSON.stringify([this._html, xpath])));
     }
-    async _getElementsBy(type, name) {
-        const keys = JSON.parse(await sendMessage("doc_get_elements_by", JSON.stringify([this._html, type, name || ''])));
-        return keys.map(k => new Element(k));
+    _getElementsBy(type, name) {
+        const raw = domMessage("doc_get_elements_by", JSON.stringify([this._html, type, name || '']));
+        return JSON.parse(raw).map(k => new Element(k));
     }
-    get children()                      { return this._getElementsBy('children'); }
-    getElementsByTagName(name)          { return this._getElementsBy('getElementsByTagName', name); }
-    getElementsByClassName(name)        { return this._getElementsBy('getElementsByClassName', name); }
-    async getElementById(id) {
-        const key = await sendMessage("doc_get_element_by_id", JSON.stringify([this._html, id]));
+    get children()                   { return this._getElementsBy('children'); }
+    getElementsByTagName(name)       { return this._getElementsBy('getElementsByTagName', name); }
+    getElementsByClassName(name)     { return this._getElementsBy('getElementsByClassName', name); }
+    getElementById(id) {
+        const key = domMessage("doc_get_element_by_id", JSON.stringify([this._html, id]));
         return new Element(key);
     }
-    async attr(attr) {
-        return sendMessage("doc_attr", JSON.stringify([this._html, attr]));
-    }
-    async hasAttr(attr) {
-        return sendMessage("doc_has_attr", JSON.stringify([this._html, attr]));
-    }
+    attr(attr)    { return domMessage("doc_attr",     JSON.stringify([this._html, attr])); }
+    hasAttr(attr) { return domMessage("doc_has_attr", JSON.stringify([this._html, attr])); }
 }
 
-// ── DOM Element (from JsDomSelector — native bridge variant with async) ───────
+// ── DOM Element (SYNCHRONOUS) ──────────────────────────────────────────────────
 class Element {
     constructor(key) { this._key = key; }
 
-    async _str(type) {
-        return sendMessage("get_element_string", JSON.stringify([type, this._key]));
-    }
+    _str(type) { return domMessage("get_element_string", JSON.stringify([type, this._key])); }
     get text()         { return this._str('text'); }
     get outerHtml()    { return this._str('outerHtml'); }
     get innerHtml()    { return this._str('innerHtml'); }
@@ -112,83 +110,76 @@ class Element {
     get getHref()      { return this._str('getHref'); }
     get getDataSrc()   { return this._str('getDataSrc'); }
 
-    async _sibling(type) {
-        const key = await sendMessage("ele_element_sibling", JSON.stringify([type, this._key]));
+    _sibling(type) {
+        const key = domMessage("ele_element_sibling", JSON.stringify([type, this._key]));
         return new Element(key);
     }
     get previousElementSibling() { return this._sibling('previousElementSibling'); }
     get nextElementSibling()     { return this._sibling('nextElementSibling'); }
 
-    async selectFirst(selector) {
-        const key = await sendMessage("ele_selectFirst", JSON.stringify([selector, this._key]));
+    selectFirst(selector) {
+        const key = domMessage("ele_selectFirst", JSON.stringify([selector, this._key]));
         return new Element(key);
     }
-    async select(selector) {
-        const keys = JSON.parse(await sendMessage("ele_select", JSON.stringify([selector, this._key])));
-        return keys.map(k => new Element(k));
+    select(selector) {
+        const raw = domMessage("ele_select", JSON.stringify([selector, this._key]));
+        return JSON.parse(raw).map(k => new Element(k));
     }
-    async _getElementsBy(type, name) {
-        const keys = JSON.parse(await sendMessage("ele_get_elements_by", JSON.stringify([type, name || '', this._key])));
-        return keys.map(k => new Element(k));
+    _getElementsBy(type, name) {
+        const raw = domMessage("ele_get_elements_by", JSON.stringify([type, name || '', this._key]));
+        return JSON.parse(raw).map(k => new Element(k));
     }
-    get children()                { return this._getElementsBy('children'); }
-    getElementsByTagName(name)    { return this._getElementsBy('getElementsByTagName', name); }
-    getElementsByClassName(name)  { return this._getElementsBy('getElementsByClassName', name); }
-
-    async attr(name) {
-        return sendMessage("ele_attr", JSON.stringify([name, this._key]));
-    }
-    async hasAttr(name) {
-        return sendMessage("ele_has_attr", JSON.stringify([name, this._key]));
-    }
-    async xpathFirst(xpath) {
-        return sendMessage("ele_xpathFirst", JSON.stringify([xpath, this._key]));
-    }
-    async xpath(xpath) {
-        return JSON.parse(await sendMessage("ele_xpath", JSON.stringify([xpath, this._key])));
-    }
+    get children()               { return this._getElementsBy('children'); }
+    getElementsByTagName(name)   { return this._getElementsBy('getElementsByTagName', name); }
+    getElementsByClassName(name) { return this._getElementsBy('getElementsByClassName', name); }
+    attr(name)    { return domMessage("ele_attr",      JSON.stringify([name, this._key])); }
+    hasAttr(name) { return domMessage("ele_has_attr",  JSON.stringify([name, this._key])); }
+    xpathFirst(xpath) { return domMessage("ele_xpathFirst", JSON.stringify([xpath, this._key])); }
+    xpath(xpath) { return JSON.parse(domMessage("ele_xpath", JSON.stringify([xpath, this._key]))); }
 }
 
-// ── Utilities / helpers (from JsUtils) ───────────────────────────────────────
+// ── Utilities ──────────────────────────────────────────────────────────────────
 function jsonStringify(obj) { try { return JSON.stringify(obj); } catch(e) { return '{}'; } }
-function extLog(msg) { sendMessage("ext_log", JSON.stringify([msg])); }
+function extLog(msg) { sendMessage("ext_log", JSON.stringify([String(msg)])); }
+function print(msg)  { extLog(String(msg)); }
 
-// SelectFilter, CheckBoxFilter, etc. (filter model stubs)
-class SelectFilter {
-    constructor(name, values) { this.name = name; this.values = values || []; this.state = 0; }
-}
-class CheckBoxFilter {
-    constructor(name) { this.name = name; this.state = false; }
-}
-class TriStateFilter {
-    constructor(name) { this.name = name; this.state = 0; }
-}
-class TextFilter {
-    constructor(name) { this.name = name; this.value = ''; }
-}
-class NumberFilter {
-    constructor(name, min, max, def) { this.name = name; this.min = min; this.max = max; this.state = def || min; }
-}
-class SortFilter {
-    constructor(name, values) { this.name = name; this.values = values || []; this.state = { index: 0, ascending: false }; }
-}
-class GroupFilter {
-    constructor(name, filters) { this.name = name; this.filters = filters || []; }
-}
-class SeparatorFilter { constructor() {} }
-class HeaderFilter { constructor(name) { this.name = name; } }
+// ── Filter classes ─────────────────────────────────────────────────────────────
+class SelectFilter       { constructor(name, values) { this.name = name; this.values = values || []; this.state = 0; } }
+class CheckBoxFilter     { constructor(name) { this.name = name; this.state = false; } }
+class TriStateFilter     { constructor(name) { this.name = name; this.state = 0; } }
+class TextFilter         { constructor(name) { this.name = name; this.value = ''; } }
+class NumberFilter       { constructor(name, min, max, def) { this.name = name; this.min = min; this.max = max; this.state = def || min; } }
+class SortFilter         { constructor(name, values) { this.name = name; this.values = values || []; this.state = { index: 0, ascending: false }; } }
+class GroupFilter        { constructor(name, filters) { this.name = name; this.filters = filters || []; } }
+class SeparatorFilter    { constructor() {} }
+class HeaderFilter       { constructor(name) { this.name = name; } }
 
-// SourcePreference stubs
-class ListPreference {
-    constructor(opts) { Object.assign(this, opts); }
-}
-class EditTextPreference {
-    constructor(opts) { Object.assign(this, opts); }
-}
-class CheckBoxPreference {
-    constructor(opts) { Object.assign(this, opts); }
-}
-class MultiSelectListPreference {
-    constructor(opts) { Object.assign(this, opts); }
+// ── Preference classes ─────────────────────────────────────────────────────────
+class ListPreference          { constructor(opts) { Object.assign(this, opts); } }
+class EditTextPreference      { constructor(opts) { Object.assign(this, opts); } }
+class CheckBoxPreference      { constructor(opts) { Object.assign(this, opts); } }
+class MultiSelectListPreference { constructor(opts) { Object.assign(this, opts); } }
+
+// ── SharedPreferences — backed by a global __sharedPrefsStore ─────────────────
+// The runner pre-populates __sharedPrefsStore with defaults from getSourcePreferences()
+// before calling the actual method, so extensions get correct default values.
+class SharedPreferences {
+    constructor() {}
+    _store() { return typeof __sharedPrefsStore !== 'undefined' ? __sharedPrefsStore : {}; }
+    get(key, def)           { const v = this._store()[key]; return v !== undefined ? v : (def !== undefined ? def : null); }
+    getString(key, def)     { const v = this._store()[key]; return v !== undefined ? v : (def !== undefined ? def : ''); }
+    getStringList(key, def) { const v = this._store()[key]; return v !== undefined ? v : (def !== undefined ? def : []); }
+    getBool(key, def)       { const v = this._store()[key]; return v !== undefined ? v : (def !== undefined ? def : false); }
+    getInt(key, def)        { const v = this._store()[key]; return v !== undefined ? v : (def !== undefined ? def : 0); }
+    getDouble(key, def)     { const v = this._store()[key]; return v !== undefined ? v : (def !== undefined ? def : 0.0); }
+    set(key, val)           { this._store()[key] = val; return true; }
+    setString(key, val)     { this._store()[key] = val; return true; }
+    setStringList(key, val) { this._store()[key] = val; return true; }
+    setBool(key, val)       { this._store()[key] = val; return true; }
+    setInt(key, val)        { this._store()[key] = val; return true; }
+    setDouble(key, val)     { this._store()[key] = val; return true; }
+    remove(key)             { delete this._store()[key]; return true; }
+    containsKey(key)        { return key in this._store(); }
+    getKeys()               { return Object.keys(this._store()); }
 }
 `;
