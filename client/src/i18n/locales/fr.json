@@ -1,0 +1,26 @@
+{
+  "app": { "title": "Watchtower Dev", "subtitle": "Testeur d'extensions" },
+  "sidebar": {
+    "browse": "Parcourir", "local": "Local", "search": "Rechercher des extensions…",
+    "all": "Tout", "noExtensions": "Aucune extension trouvée", "refresh": "Actualiser",
+    "uploadFile": "Uploader un fichier", "pasteCode": "Coller du code", "loadExtension": "Charger",
+    "extensionName": "Nom de l'extension", "stats": "{{count}} extensions",
+    "categories": { "manga": "Manga", "watch": "Watch", "novel": "Roman", "game": "Jeu", "music": "Musique" }
+  },
+  "runner": {
+    "method": "Méthode", "page": "Page", "query": "Recherche", "url": "URL",
+    "run": "Lancer", "running": "En cours…", "stop": "Arrêter",
+    "source": "Source", "sourceId": "ID source", "displayName": "Nom", "language": "Langue",
+    "baseUrl": "URL de base", "type": "Type", "noParams": "Aucun paramètre",
+    "noExtension": "Sélectionne une extension dans la barre latérale"
+  },
+  "results": {
+    "results": "Résultats", "console": "Console", "reader": "Lecteur", "video": "Vidéo",
+    "noResult": "Sélectionne une extension et lance une méthode",
+    "resultsWillAppear": "Les résultats apparaîtront ici",
+    "items": "{{count}} résultats", "backToResults": "← Retour aux résultats",
+    "running": "Extension en cours…", "chapters": "{{count}} chapitres", "episodes": "{{count}} épisodes"
+  },
+  "theme": { "dark": "Sombre", "light": "Clair", "system": "Système", "color": "Couleur" },
+  "lang": { "en": "English", "fr": "Français" }
+}
