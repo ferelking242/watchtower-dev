@@ -1,0 +1,26 @@
+{
+  "app": { "title": "Watchtower Dev", "subtitle": "Extension Tester" },
+  "sidebar": {
+    "browse": "Browse", "local": "Local", "search": "Search extensions…",
+    "all": "All", "noExtensions": "No extensions found", "refresh": "Refresh",
+    "uploadFile": "Upload file", "pasteCode": "Paste code", "loadExtension": "Load Extension",
+    "extensionName": "Extension name", "stats": "{{count}} extensions",
+    "categories": { "manga": "Manga", "watch": "Watch", "novel": "Novel", "game": "Game", "music": "Music" }
+  },
+  "runner": {
+    "method": "Method", "page": "Page", "query": "Query", "url": "URL",
+    "run": "Run", "running": "Running…", "stop": "Stop",
+    "source": "Source", "sourceId": "Source ID", "displayName": "Name", "language": "Language",
+    "baseUrl": "Base URL", "type": "Type", "noParams": "No parameters",
+    "noExtension": "Select an extension from the sidebar"
+  },
+  "results": {
+    "results": "Results", "console": "Console", "reader": "Reader", "video": "Video",
+    "noResult": "Select an extension and run a method",
+    "resultsWillAppear": "Results will appear here",
+    "items": "{{count}} results", "backToResults": "← Back to results",
+    "running": "Running extension…", "chapters": "{{count}} Chapters", "episodes": "{{count}} Episodes"
+  },
+  "theme": { "dark": "Dark", "light": "Light", "system": "System", "color": "Color" },
+  "lang": { "en": "English", "fr": "Français" }
+}
