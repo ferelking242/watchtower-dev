@@ -1,158 +1,79 @@
-# 🗼 Watchtower Dev
+# Watchtower Dev
 
-**Extension testing tool for [Watchtower](https://github.com/kodjodevf/mangayomi) developers.**
+> Web-based extension testing tool for [Watchtower](https://github.com/kodjodevf/mangayomi) (Mangayomi fork) JS & Dart extensions.
 
-Test your JS and Dart extensions against the exact same engine used in the Watchtower app — same QuickJS runtime, same HTTP bridge, same DOM parser, same error messages. What you see here is what you get in the app.
-
----
+![Watchtower Dev](https://img.shields.io/badge/Watchtower-Dev-blue?style=flat-square)
+![Extensions](https://img.shields.io/badge/Extensions-700%2B-green?style=flat-square)
+![License](https://img.shields.io/badge/License-MIT-gray?style=flat-square)
 
 ## Features
 
-- **Identical JS engine** — QuickJS (same engine as `flutter_qjs`)
-- **Full HTTP bridge** — real network requests, same response format as the app
-- **DOM bridge** — cheerio-based, matching the Dart `html` package behavior
-- **Extension browser** — browse and load extensions from `watchtower-extensions` on GitHub
-- **Full flow testing** — getPopular → search → getDetail → getPageList / getVideoList
-- **Manga reader** — view actual pages returned by `getPageList`
-- **Video player** — HLS + MP4 playback for `getVideoList` results
-- **Real-time console** — every HTTP request, DOM call, and JS log visible in real time
-- **CLI tool** — for automated testing and CI pipelines
+- 🗼 **Browse 700+ extensions** from [ferelking242/watchtower-extensions](https://github.com/ferelking242/watchtower-extensions) — manga, watch, novel, game, music
+- 🔍 **Filter** by category, language, and type (JS / Dart)
+- ▶️ **Run extension methods** — `getPopular`, `search`, `getDetail`, `getPageList`, `getVideoList`, and more
+- 📺 **Live results** — media grid, detail view, manga reader, video player
+- 🖥️ **Dev console** — real-time SSE logs (network, bridge, runtime errors)
+- 🎨 **Multiple themes** — dark / light + 5 accent colours (blue, violet, red, emerald, orange)
+- 🌐 **i18n** — English & French UI
+- 📁 **Local extensions** — upload a `.js` or `.dart` file, or paste code directly
 
----
+## Stack
 
-## Architecture
-
-```
-watchtower_dev/
-├── server/                  Node.js Express server (port 5000)
-│   ├── engine/
-│   │   ├── js-runner.js     QuickJS (asyncify) engine — identical to flutter_qjs
-│   │   ├── base-api.js      MProvider + Client + Document + Element (injected JS)
-│   │   ├── dom-bridge.js    DOM channel handlers (cheerio)
-│   │   └── http-bridge.js   HTTP channel handlers (axios)
-│   ├── routes/
-│   │   ├── run.js           POST /api/run — stream test results via SSE
-│   │   └── extensions.js    GET /api/extensions/* — GitHub repo browser
-│   └── index.js             Server entry point
-├── client/                  React + Vite + Tailwind frontend
-│   └── src/
-│       ├── App.jsx
-│       └── components/
-│           ├── Sidebar.jsx       Extension browser + local file loader
-│           ├── TestRunner.jsx    Method selector + parameter inputs
-│           ├── ResultGrid.jsx    Grid of manga/anime cards (covers, titles)
-│           ├── DevConsole.jsx    Real-time log viewer
-│           ├── MangaReader.jsx   Page-by-page manga reader
-│           └── VideoPlayer.jsx   HLS/MP4 video player
-└── cli/
-    └── index.js             CLI tool for automated testing
-```
-
----
-
-## How the JS Engine Works
-
-The JS engine is a faithful Node.js replica of `JsExtensionService` in the Watchtower app:
-
-1. **QuickJS runtime** — `quickjs-emscripten` (asyncify variant) — same QuickJS as `flutter_qjs`
-2. **`sendMessage` bridge** — async function dispatched to Node.js handlers per channel:
-   - `http_get / http_post / …` → `axios` (real HTTP, same response JSON shape)
-   - `get_doc_element / doc_select / ele_attr / …` → `cheerio` (same as Dart `html` package)
-3. **Base API injected** — `MProvider`, `Client`, `Document`, `Element`, filter classes
-4. **Extension code evaluated** — `DefaultExtension extends MProvider`
-5. **Method called** — `extention.getPopular(page)`, `extention.search(query, page, filters)`, etc.
-
-Extensions see the exact same API surface as in the app. Errors are identical.
-
----
+- **Server**: Node.js + Express (ES modules), SSE streaming
+- **Client**: React 18 + Vite, shadcn/ui design system, Tailwind CSS v3
+- **i18n**: react-i18next
+- **Extension engine**: Dart VM bridge + QuickJS (JS extensions)
 
 ## Getting Started
 
-### Prerequisites
-
-- Node.js 20+
-- npm
-
-### Install & Run
-
 ```bash
-cd watchtower_dev
-npm run install:all
-npm start
+# Clone
+git clone https://github.com/ferelking242/watchtower-dev.git
+cd watchtower-dev
+
+# Install
+cd server && npm install
+cd ../client && npm install
+
+# Set env
+export GITHUB_TOKEN=your_pat_with_repo_scope
+
+# Run server (port 3000)
+cd server && npm start
+
+# Build client
+cd client && npm run build
+# Client is served statically by the server at /
 ```
-
-Open `http://localhost:5000` in your browser.
-
-### CLI
-
-```bash
-# Test getPopular
-node cli/index.js --file path/to/extension.js --method getPopular --page 1
-
-# Search
-node cli/index.js --file ext.js --method search --query "naruto" --page 1
-
-# Get video list
-node cli/index.js --file anime.js --method getVideoList --url "https://…"
-
-# JSON output (for CI/piping)
-node cli/index.js --file ext.js --method getPopular --json
-
-# Verbose mode (shows all bridge calls)
-node cli/index.js --file ext.js --method getPopular --verbose
-```
-
----
 
 ## Environment Variables
 
-| Variable | Description |
+| Variable | Required | Description |
+|---|---|---|
+| `GITHUB_TOKEN` | Optional | GitHub PAT — needed for private extension repos. Falls back to unauthenticated (rate-limited). |
+
+## Extension Categories
+
+| Category | Count |
 |---|---|
-| `GITHUB_TOKEN` | GitHub PAT for accessing `watchtower-extensions` (avoids rate limits) |
-| `PORT` | Server port (default: 5000) |
+| Manga | 273 |
+| Watch | 179 |
+| Novel | 245 |
+| Game | 1 |
+| Music | 5 |
 
----
+## API Endpoints
 
-## Testing Your Extension
-
-1. Open the app at `http://localhost:5000`
-2. In the sidebar, either:
-   - **Browse** → pick an extension from `watchtower-extensions`
-   - **Local** → upload your `.js` file or paste code
-3. Set the **Source** metadata (name, lang, baseUrl) to match your extension
-4. Pick a method (`getPopular`, `search`, etc.) and hit **Run**
-5. Watch the console for HTTP requests and any errors
-6. Results appear as a grid — click through to detail, pages, or video
-
----
-
-## Extension API Reference
-
-Your extension must define `class DefaultExtension extends MProvider`:
-
-```js
-class DefaultExtension extends MProvider {
-  // Required for manga/webtoon sources:
-  async getPopular(page) { /* → { list: [{ title, imageUrl, link }], hasNextPage } */ }
-  async getLatestUpdates(page) { /* → same shape as getPopular */ }
-  async search(query, page, filters) { /* → same shape */ }
-  async getDetail(url) { /* → { title, imageUrl, description, author, chapters: [...] } */ }
-  async getPageList(url) { /* → [imageUrl, ...] */ }
-
-  // Required for anime sources:
-  async getVideoList(url) { /* → [{ url, quality, headers }] */ }
-
-  // Optional:
-  getFilterList() { /* → [SelectFilter, CheckBoxFilter, ...] */ }
-  getSourcePreferences() { /* → [ListPreference, ...] */ }
-  get supportsLatest() { return true; }
-}
-```
-
-Available classes: `Client`, `Document`, `Element`, `SelectFilter`, `CheckBoxFilter`, `TriStateFilter`, `TextFilter`, `SortFilter`, `GroupFilter`, `ListPreference`, `EditTextPreference`, `CheckBoxPreference`, `MultiSelectListPreference`.
-
----
+| Method | Path | Description |
+|---|---|---|
+| GET | `/wt/extensions/list` | List extensions (`?category=manga&lang=en&type=js`) |
+| GET | `/wt/extensions/stats` | Count per category |
+| GET | `/wt/extensions/langs` | Available languages |
+| GET | `/wt/extensions/code` | Fetch source code (`?url=...`) |
+| POST | `/wt/run` | Run an extension method (SSE stream) |
+| GET | `/wt/proxy` | Image/resource proxy (`?url=...`) |
+| GET | `/wt/health` | Health check |
 
 ## License
 
-Apache 2.0 — same as Watchtower.
+MIT
