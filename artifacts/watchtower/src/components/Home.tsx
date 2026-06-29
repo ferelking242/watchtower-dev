@@ -214,8 +214,53 @@ function SectionHeader({ title, onSeeAll, count }: { title: string; onSeeAll: ()
   );
 }
 
-function FullGrid({ items, onItemClick, loading, error, title }: { items: MediaItem[]; onItemClick: (item: MediaItem) => void; loading?: boolean; error?: string | null; title?: string }) {
+function LoadMoreButton({ onClick, loading }: { onClick: () => void; loading: boolean }) {
+  return (
+    <div style={{ display: "flex", justifyContent: "center", padding: "20px 0 8px" }}>
+      <button
+        onClick={onClick}
+        disabled={loading}
+        style={{
+          display: "flex", alignItems: "center", gap: 8,
+          background: "var(--card-bg)", border: "1px solid var(--border)",
+          borderRadius: 10, padding: "10px 28px", cursor: loading ? "not-allowed" : "pointer",
+          color: loading ? "var(--text-muted)" : "var(--accent)",
+          fontSize: 13, fontWeight: 600, transition: "all 0.15s",
+        }}
+      >
+        {loading ? <><Loader size={13} className="spin" /> Chargement…</> : "Charger plus"}
+      </button>
+    </div>
+  );
+}
+
+function FullGrid({
+  items, onItemClick, loading, error, title, hasNextPage, loadingMore, onLoadMore
+}: {
+  items: MediaItem[];
+  onItemClick: (item: MediaItem) => void;
+  loading?: boolean;
+  error?: string | null;
+  title?: string;
+  hasNextPage?: boolean;
+  loadingMore?: boolean;
+  onLoadMore?: () => void;
+}) {
+  const sentinelRef = useRef<HTMLDivElement>(null);
   const { t } = useTranslation();
+
+  useEffect(() => {
+    if (!hasNextPage || !onLoadMore) return;
+    const el = sentinelRef.current;
+    if (!el) return;
+    const obs = new IntersectionObserver(
+      (entries) => { if (entries[0].isIntersecting && !loadingMore) onLoadMore(); },
+      { threshold: 0.1, rootMargin: "100px" }
+    );
+    obs.observe(el);
+    return () => obs.disconnect();
+  }, [hasNextPage, loadingMore, onLoadMore]);
+
   if (loading) return <div style={{ display: "flex", alignItems: "center", gap: 8, color: "var(--text-muted)", fontSize: 13, padding: "40px 0" }}><Loader size={14} className="spin" />{t("loading")}</div>;
   if (error) return <div style={{ display: "flex", alignItems: "center", gap: 6, color: "#ef4444", fontSize: 13, padding: "20px 0" }}><AlertCircle size={14} />{error}</div>;
   if (items.length === 0) return <div style={{ color: "var(--text-muted)", fontSize: 13, padding: "40px 0", textAlign: "center" }}>{t("noResults")}</div>;
@@ -225,6 +270,10 @@ function FullGrid({ items, onItemClick, loading, error, title }: { items: MediaI
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(110px, 1fr))", gap: "14px 10px" }}>
         {items.map((item, i) => <MediaCard key={i} item={item} onClick={() => onItemClick(item)} />)}
       </div>
+      {hasNextPage && onLoadMore && (
+        <LoadMoreButton onClick={onLoadMore} loading={!!loadingMore} />
+      )}
+      <div ref={sentinelRef} style={{ height: 1 }} />
     </div>
   );
 }
@@ -236,14 +285,16 @@ interface HomeProps {
   onItemClick: (item: MediaItem) => void;
   onRun: (method: string, params?: Record<string, unknown>) => Promise<unknown>;
   onSearch?: (query: string) => void;
+  onLoadMorePopular?: () => void;
+  onLoadMoreLatest?: () => void;
   runState: {
-    popular: { loading: boolean; items: MediaItem[]; error: string | null };
-    latest: { loading: boolean; items: MediaItem[]; error: string | null };
+    popular: { loading: boolean; loadingMore?: boolean; items: MediaItem[]; error: string | null; hasNextPage?: boolean };
+    latest: { loading: boolean; loadingMore?: boolean; items: MediaItem[]; error: string | null; hasNextPage?: boolean };
     search: { loading: boolean; items: MediaItem[]; error: string | null };
   };
 }
 
-export function Home({ extension, onItemClick, onSearch, runState }: HomeProps) {
+export function Home({ extension, onItemClick, onSearch, runState, onLoadMorePopular, onLoadMoreLatest }: HomeProps) {
   const { t } = useTranslation();
   const [tab, setTab] = useState<Tab>("accueil");
   const [searchQuery, setSearchQuery] = useState("");
@@ -379,6 +430,9 @@ export function Home({ extension, onItemClick, onSearch, runState }: HomeProps) 
                 loading={runState.popular.loading}
                 error={runState.popular.error}
                 title="Popular"
+                hasNextPage={runState.popular.hasNextPage}
+                loadingMore={runState.popular.loadingMore}
+                onLoadMore={onLoadMorePopular}
               />
             )}
           </div>
@@ -392,6 +446,9 @@ export function Home({ extension, onItemClick, onSearch, runState }: HomeProps) 
               loading={runState.latest.loading}
               error={runState.latest.error}
               title="Latest Updates"
+              hasNextPage={runState.latest.hasNextPage}
+              loadingMore={runState.latest.loadingMore}
+              onLoadMore={onLoadMoreLatest}
             />
           </div>
         )}

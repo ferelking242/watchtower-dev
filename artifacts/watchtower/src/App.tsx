@@ -10,16 +10,29 @@ import "./i18n/index";
 
 type View = "home" | "detail" | "reader" | "player";
 
+interface SectionState {
+  loading: boolean;
+  loadingMore: boolean;
+  items: MediaItem[];
+  error: string | null;
+  hasNextPage: boolean;
+  page: number;
+}
+
 interface RunState {
-  popular: { loading: boolean; items: MediaItem[]; error: string | null };
-  latest: { loading: boolean; items: MediaItem[]; error: string | null };
+  popular: SectionState;
+  latest: SectionState;
   search: { loading: boolean; items: MediaItem[]; error: string | null };
+}
+
+function initialSection(): SectionState {
+  return { loading: false, loadingMore: false, items: [], error: null, hasNextPage: false, page: 1 };
 }
 
 function initialRunState(): RunState {
   return {
-    popular: { loading: false, items: [], error: null },
-    latest: { loading: false, items: [], error: null },
+    popular: initialSection(),
+    latest: initialSection(),
     search: { loading: false, items: [], error: null },
   };
 }
@@ -54,6 +67,12 @@ function getVideoSources(result: unknown): { url?: string; originalUrl?: string;
   return [];
 }
 
+function getHasNextPage(result: unknown): boolean {
+  if (!result || typeof result !== "object") return false;
+  const obj = result as Record<string, unknown>;
+  return obj.hasNextPage === true;
+}
+
 const BASE_URL = import.meta.env.BASE_URL || "/";
 function apiUrl(path: string): string {
   const base = BASE_URL.endsWith("/") ? BASE_URL.slice(0, -1) : BASE_URL;
@@ -74,6 +93,8 @@ function AppInner() {
   const [chapterTitle, setChapterTitle] = useState("");
   const [detailData, setDetailData] = useState<Record<string, unknown> | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const currentExtRef = useRef<Extension | null>(null);
+  const currentCodeRef = useRef<string | null>(null);
 
   const addLogs = useCallback((newLogs: LogEntry[]) => {
     setLogs((prev) => [...prev, ...newLogs]);
@@ -149,84 +170,167 @@ function AppInner() {
     return data.code || "";
   }, []);
 
+  const runWithCode = useCallback(async (
+    code: string,
+    ext: Extension,
+    method: string,
+    params: Record<string, unknown> = {}
+  ): Promise<unknown> => {
+    return new Promise<unknown>((resolve, reject) => {
+      const source = { id: ext.id, lang: ext.lang, name: ext.name, baseUrl: ext.baseUrl, category: ext.category };
+      fetch(apiUrl("/api/wt/run"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code, type: ext.type, source, method, params }),
+      }).then(async (resp) => {
+        if (!resp.ok) { reject(new Error(`HTTP ${resp.status}`)); return; }
+        const reader = resp.body?.getReader();
+        const decoder = new TextDecoder();
+        let buf = "";
+        const readLoop = async () => {
+          if (!reader) { reject(new Error("No body")); return; }
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            buf += decoder.decode(value, { stream: true });
+            const lines = buf.split("\n");
+            buf = lines.pop() || "";
+            for (const line of lines) {
+              if (!line.startsWith("data: ")) continue;
+              try {
+                const ev = JSON.parse(line.slice(6));
+                if (ev.type === "log") setLogs((prev) => [...prev, { ts: ev.ts || 0, type: ev.type, ...ev }]);
+                else if (ev.type === "done") { ev.success ? resolve(ev.result) : reject(new Error(ev.error?.message || "Run failed")); return; }
+              } catch {}
+            }
+          }
+        };
+        readLoop().catch(reject);
+      }).catch(reject);
+    });
+  }, []);
+
   const handleSelectExtension = useCallback(async (ext: Extension) => {
     setExtension(ext);
     setView("home");
     setExtCode(null);
     setRunState(initialRunState());
     setDetailData(null);
+    currentExtRef.current = ext;
 
     try {
       const code = await loadExtensionCode(ext);
       setExtCode(code);
+      currentCodeRef.current = code;
 
-      setRunState((prev) => ({ ...prev, popular: { loading: true, items: [], error: null }, latest: { loading: true, items: [], error: null } }));
-
-      const runWithCode = async (method: string, params: Record<string, unknown> = {}): Promise<unknown> => {
-        return new Promise<unknown>((resolve, reject) => {
-          const source = { id: ext.id, lang: ext.lang, name: ext.name, baseUrl: ext.baseUrl, category: ext.category };
-          fetch(apiUrl("/api/wt/run"), {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ code, type: ext.type, source, method, params }),
-          }).then(async (resp) => {
-            if (!resp.ok) { reject(new Error(`HTTP ${resp.status}`)); return; }
-            const reader = resp.body?.getReader();
-            const decoder = new TextDecoder();
-            let buf = "";
-            const readLoop = async () => {
-              if (!reader) { reject(new Error("No body")); return; }
-              while (true) {
-                const { done, value } = await reader.read();
-                if (done) break;
-                buf += decoder.decode(value, { stream: true });
-                const lines = buf.split("\n");
-                buf = lines.pop() || "";
-                for (const line of lines) {
-                  if (!line.startsWith("data: ")) continue;
-                  try {
-                    const ev = JSON.parse(line.slice(6));
-                    if (ev.type === "log") setLogs((prev) => [...prev, { ts: ev.ts || 0, type: ev.type, ...ev }]);
-                    else if (ev.type === "done") { ev.success ? resolve(ev.result) : reject(new Error(ev.error?.message || "Run failed")); return; }
-                  } catch {}
-                }
-              }
-            };
-            readLoop().catch(reject);
-          }).catch(reject);
-        });
-      };
+      setRunState((prev) => ({
+        ...prev,
+        popular: { ...initialSection(), loading: true },
+        latest: { ...initialSection(), loading: true },
+      }));
 
       const [popularResult, latestResult] = await Promise.allSettled([
-        runWithCode("getPopular", { page: 1 }),
-        runWithCode("getLatestUpdates", { page: 1 }).catch(() => null),
+        runWithCode(code, ext, "getPopular", { page: 1 }),
+        runWithCode(code, ext, "getLatestUpdates", { page: 1 }).catch(() => null),
       ]);
 
       const popularItems = popularResult.status === "fulfilled" ? getItemList(popularResult.value) : [];
       const latestItems = latestResult.status === "fulfilled" && latestResult.value ? getItemList(latestResult.value) : [];
+      const popularHasNext = popularResult.status === "fulfilled" ? getHasNextPage(popularResult.value) : false;
+      const latestHasNext = latestResult.status === "fulfilled" && latestResult.value ? getHasNextPage(latestResult.value) : false;
 
       setRunState({
         popular: {
           loading: false,
+          loadingMore: false,
           items: popularItems,
           error: popularResult.status === "rejected" ? (popularResult.reason as Error).message : null,
+          hasNextPage: popularHasNext,
+          page: 1,
         },
         latest: {
           loading: false,
+          loadingMore: false,
           items: latestItems,
           error: latestResult.status === "rejected" ? (latestResult.reason as Error).message : null,
+          hasNextPage: latestHasNext,
+          page: 1,
         },
         search: { loading: false, items: [], error: null },
       });
     } catch (e) {
       const msg = (e as Error).message;
       setRunState({
-        popular: { loading: false, items: [], error: msg },
-        latest: { loading: false, items: [], error: null },
+        popular: { ...initialSection(), error: msg },
+        latest: initialSection(),
         search: { loading: false, items: [], error: null },
       });
     }
-  }, [loadExtensionCode]);
+  }, [loadExtensionCode, runWithCode]);
+
+  const handleLoadMorePopular = useCallback(async () => {
+    const ext = currentExtRef.current;
+    const code = currentCodeRef.current;
+    if (!ext || !code) return;
+
+    setRunState((prev) => {
+      if (prev.popular.loadingMore || !prev.popular.hasNextPage) return prev;
+      return { ...prev, popular: { ...prev.popular, loadingMore: true } };
+    });
+
+    setRunState((prev) => {
+      const nextPage = prev.popular.page + 1;
+      runWithCode(code, ext, "getPopular", { page: nextPage }).then((result) => {
+        const newItems = getItemList(result);
+        const hasNext = getHasNextPage(result);
+        setRunState((s) => ({
+          ...s,
+          popular: {
+            ...s.popular,
+            loadingMore: false,
+            items: [...s.popular.items, ...newItems],
+            hasNextPage: hasNext,
+            page: nextPage,
+          },
+        }));
+      }).catch((e) => {
+        setRunState((s) => ({ ...s, popular: { ...s.popular, loadingMore: false, error: (e as Error).message } }));
+      });
+      return { ...prev, popular: { ...prev.popular, page: prev.popular.page + 1 } };
+    });
+  }, [runWithCode]);
+
+  const handleLoadMoreLatest = useCallback(async () => {
+    const ext = currentExtRef.current;
+    const code = currentCodeRef.current;
+    if (!ext || !code) return;
+
+    setRunState((prev) => {
+      if (prev.latest.loadingMore || !prev.latest.hasNextPage) return prev;
+      return { ...prev, latest: { ...prev.latest, loadingMore: true } };
+    });
+
+    setRunState((prev) => {
+      const nextPage = prev.latest.page + 1;
+      runWithCode(code, ext, "getLatestUpdates", { page: nextPage }).then((result) => {
+        const newItems = getItemList(result);
+        const hasNext = getHasNextPage(result);
+        setRunState((s) => ({
+          ...s,
+          latest: {
+            ...s.latest,
+            loadingMore: false,
+            items: [...s.latest.items, ...newItems],
+            hasNextPage: hasNext,
+            page: nextPage,
+          },
+        }));
+      }).catch((e) => {
+        setRunState((s) => ({ ...s, latest: { ...s.latest, loadingMore: false, error: (e as Error).message } }));
+      });
+      return { ...prev, latest: { ...prev.latest, page: prev.latest.page + 1 } };
+    });
+  }, [runWithCode]);
 
   const handleItemClick = useCallback((item: MediaItem) => {
     setSelectedItem(item);
@@ -290,6 +394,8 @@ function AppInner() {
             onRun={handleRun}
             onSearch={handleSearchRun}
             runState={runState}
+            onLoadMorePopular={handleLoadMorePopular}
+            onLoadMoreLatest={handleLoadMoreLatest}
           />
         )}
         {view === "detail" && selectedItem && extension && (
